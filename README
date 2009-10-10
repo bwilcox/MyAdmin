@@ -5,9 +5,8 @@ have done and it's time for me to give back to the net community.
 
 I make no guarantee that these will work for everyone in everyplace.  
 However the point is that they may come close to what you need to 
-do.  With a little modification they may do exactly what you need.  I'm
-making these available under the BSD License.  Not because they are brilliant
-works but more that are unsupported and like many things in life if you don't 
+do.  With a little modification they may do exactly what you need. These
+scripts are unsupported and like many things in life if you don't 
 know what you're doing some of these programs could prove destructive in 
 your environment.  Please read through them and understand what they do before
 you blow something up.
@@ -18,7 +17,7 @@ before they will work.
 What's here:
 dsh.rb - My attempt to replicate the function of dsh on the old RS/6000 SP.
 inetdoff.rb - Search inetd.conf files, look for and deactivate protocols.
-buildsec.rb - Parse inetd.conf and create appropriate entries in inetd.sec.
+buildsec - Parse inetd.conf and create appropriate entries in inetd.sec.
 ldapgroup - Return users in a group, or a users' groups.
 ldappush - Take a user from an old LDAP and migrate them to the new LDAP.
 serverbase.rb - Functions I found myself doing a lot, so I put them in a lib.
