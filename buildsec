@@ -1,0 +1,240 @@
+#!/usr/local/bin/ruby
+#
+# 07-13-2009 Bill W. - Initial design.  Attempt to look at an inetd.conf
+#	file and generate corresponding entries in inetd.sec
+#
+require 'rubygems'
+require 'optparse'
+require 'ostruct'
+require 'net/ssh' # Only if using ssh to execute remote commands
+require 'net/scp'
+require 'serverbase.rb' # Provides ping/ssh/os checks
+include BaseServerInfo
+
+
+#
+# Variables
+#
+
+options = OpenStruct.new
+options.server = String.new
+options.file = String.new
+version = "0.2"
+@workdir = "/work/dir"
+@tmpdir = "/tmp/dir"
+@inputinetd = "inetd.conf"
+@inputsec = "inetd.sec"
+@outputsec = "inetd.sec.new"
+@logfile = "runlog.txt"
+
+#
+# Functions
+#
+
+def activefind(data)
+  if data =~ /^\w/
+    if @active.include?(data.split[0])
+    else
+      @active << data.split[0]
+    end
+  end
+end
+
+def deactivefind(data)
+  if data =~ /^\#/
+    if data =~ /(tcp|udp)/
+      data.gsub!(/#/, "")
+      if data.split[0] == "rpc"
+        if @deactive.include?(data.split[8].split(".")[1])
+        else
+          @deactive << data.split[8].split(".")[1]
+        end
+      else
+        if @deactive.include?(data.split[0])
+        else
+          @deactive << data.split[0]
+        end
+      end
+    end
+  end
+end
+
+def servicelist
+  @deactive.each { |x|
+    if @active.include?(x)
+    else
+      @services << x
+    end
+  }
+  @secured.each { |x|
+    if @services.include?(x)
+      @services.delete(x)
+    end
+  }
+end
+
+def seclist(data)
+  if data =~ /^\#/
+  else
+    @secured << data.split[0]
+  end
+end
+
+
+def process_server(server)
+  begin # rescue
+  # Verify server OS
+  oscheck = OsChecker(server)
+ 
+  # If there are errors, note it and do not continue to process.
+  if oscheck[:errmsg] != ""
+    puts "\t ERROR contacting server: #{oscheck[:errmsg]}"
+    @log.puts "\t ERROR contacting server: #{oscheck[:errmsg]}"
+    return
+  end
+
+  # Process the inetd.sec file and git er done.
+  if oscheck[:ostype] == "HP-UX"
+    puts "\t OS is HP, continuing."
+    @log.puts "\t OS is HP, continuing."
+
+    # Backup the inetd.sec file on the remote server
+    Net::SSH.start(server, 'root', :paranoid => false, :timeout => 30, :auth_methods => "publickey") do |ssh|
+      puts "\t Backing up old inetd.sec file."
+      @log.puts "\t Backing up old inetd.sec file."
+      stamp = Time.now.strftime("%Y-%m-%d")
+      command = "cp /var/adm/inetd.sec /var/adm/inetd.sec.#{stamp}"
+      ssh.exec!(command)
+    end
+
+    puts "\t Creating new inetd.sec file..."
+    @log.puts "\t Creating new inetd.sec file..."
+
+    # Copy down both inetd.conf and inetd.sec files
+    Net::SCP.start(server, "root", :paranoid => false, :timeout => 30, :auth_methods => "publickey") do |scp|
+      scp.download!("/etc/inetd.conf", "#{@tmpdir}/inetd.conf")
+      scp.download!("/var/adm/inetd.sec", "#{@tmpdir}/inetd.sec")
+    end
+
+    # Process the files
+    inetfile = File.open("#{@tmpdir}/#{@inputinetd}", "r")
+
+    inetfile.each do |line|
+      activefind(line)
+      deactivefind(line)
+    end
+
+    newsecfile = File.open("#{@tmpdir}/#{@outputsec}", "w")
+    secfile = File.open("#{@tmpdir}/#{@inputsec}", "r")
+
+    secfile.each do |line|
+      seclist(line)
+      if line =~ /\*$/
+        newline = line
+      elsif line =~ /deny/
+        newline = line.strip + " *"
+      else
+        newline = line
+      end
+      newsecfile.puts newline
+    end
+
+    servicelist
+
+    @services.each { |service|
+      newsecfile.puts "#{service} deny *"
+    }
+
+    inetfile.close
+    secfile.close
+    newsecfile.close
+
+    # Copy the new file back to the server
+    puts "\t Copying the updated sec file back to server."
+    @log.puts "\t Copying the updated sec file back to server."
+    Net::SCP.start(server, "root", :paranoid => false, :timeout => 30, :auth_methods => "publickey") do |scp|
+      scp.upload!("#{@tmpdir}/#{@outputsec}", "/var/adm/inetd.sec")
+    end
+
+    # Clean up the files in our tmp dir
+    File.delete("#{@tmpdir}/#{@outputsec}")
+    File.delete("#{@tmpdir}/#{@inputsec}")
+    File.delete("#{@tmpdir}/#{@inputinetd}")
+  else
+    puts "\t OS is #{oscheck[:ostype]} and is not subject to this script."
+    @log.puts "\t OS is #{oscheck[:ostype]} and is not subject to this script."
+  end
+  rescue => ex
+    puts "\t Error encountered, please check server:  #{ex.class}: #{ex.message}"
+    @log.puts "\t Error encountered, please check server:  #{ex.class}: #{ex.message}"
+  end
+end
+
+#
+# Main
+#
+
+# Pull out command line options and set the appropriate variables
+OptionParser.new do |opts|
+  opts.banner = "Useage : buildsec [options]"
+
+  opts.on("-s [server]", String, "Act on a single server.") do |list|
+    options.server = list
+  end
+  opts.on("-f \"Server List File\"", String, "Server list file, one server per line") do |cmnd|
+    options.file = cmnd
+  end
+  opts.on_tail("-h", "-?", "--help", "Show this message") do
+    puts opts
+    exit
+  end
+  opts.on_tail("-v", "--version", "Show version") do
+    puts "version: #{version}"
+    exit
+  end
+
+end.parse! # Optionparser
+
+if options.server != "" && options.file != ""
+  puts "-s and -f are mutually exclusive.  One or the other please."
+  exit
+end
+if options.server == "" && options.file == ""
+  puts "Don't wake me up if there's no work to do. Specify a command line option please."
+  exit
+end
+
+# Open the log file
+@log = File.open("#{@workdir}/#{@logfile}", "a")
+@log.puts "New buildsec run started at #{Time.now} with options: #{options}"
+
+if options.server != ""
+  #Process Server
+  @active = Array.new
+  @deactive = Array.new
+  @services = Array.new
+  @existing = Array.new
+  @secured = Array.new
+  puts "Processing #{options.server}."
+  @log.puts "Processing #{options.server}."
+  process_server(options.server)
+end
+
+if options.file != ""
+  #Process Server list file
+  slist = File.open(options.file, "r")
+  slist.each do |line|
+    if line =~ /^\w/
+      @active = Array.new
+      @deactive = Array.new
+      @services = Array.new
+      @existing = Array.new
+      @secured = Array.new
+      puts "Processing #{line.strip}."
+      @log.puts "Processing #{line.strip}."
+      process_server(line.strip)
+    end
+  end
+end
+
+@log.close

@@ -1,0 +1,69 @@
+#!/usr/local/bin/ruby
+#
+# 06-10-09 Bill Wilcox Intial design, list ldap group members.
+#
+
+require 'rubygems'
+require 'net/ldap'
+require 'resolv'
+require 'optparse'
+require 'ostruct'
+
+# Variables
+group = String.new
+user = String.new
+options = OpenStruct.new
+options.list = []
+
+# Functions
+
+
+
+#
+# Main
+#
+
+OptionParser.new do |opts|
+  opts.banner = "Useage : ldappush -g <group>"
+
+  opts.on("-g \"Group\"", String, "Group to list.") do |cmnd|
+    group = cmnd
+  end
+
+  opts.on("-u \"User\"", String, "User to search for.") do |cmnd|
+    user = cmnd
+  end
+
+  opts.on_tail("-h", "--help", "-?", "Show this message") do
+    puts opts
+    exit
+  end
+
+end.parse!
+
+ldap = Net::LDAP.new :host => "yourhost", :port => 389, :auth => { :method => :simple, :username => "username", :password => "password" }
+
+if group != "" && user == ""
+  filter = Net::LDAP::Filter.eq( "cn", group )
+  treebase = "dc=whatever,dc=com"
+  attr = ["memberUid"]
+  puts "UserID's in #{group} on LDAP."
+  ldap.search( :base => treebase, :filter => filter, :attributes => attr ) do |entry| 
+    entry[:memberuid].each do |x|
+      puts x
+    end
+  end
+end
+
+if user != "" && group == ""
+  filter = Net::LDAP::Filter.eq( "memberUid", user )
+  treebase = "ou=group,dc=whatever,dc=com"
+  attr = ["cn"]
+  puts "Looking for #{user}'s groups."
+  ldap.search( :base => treebase, :filter => filter, :attributes => attr ) do |entry| 
+    entry[:cn].each do |x|
+      puts x
+    end
+  end
+end
+

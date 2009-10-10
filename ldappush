@@ -1,0 +1,182 @@
+#!/usr/local/bin/ruby
+#
+# This script was designed to facilitate transition from an old ldap
+# to a new ldap.  Process required users be in both places during the 
+# transition.
+#
+# 06-10-09 Bill Wilcox Intial design, take a user from old ldap and 
+#	check if they're in new ldap.  If they are, modify the entry
+#	appropriately.  If they're not, push them into the new ldap. 
+# 06-11-09 Bill Wilcox Added options parser with basic help banner.
+# 07-21-09 Bill Wilcox Added check for user groups and will
+#	push the user into the same groups if not already there.
+#
+
+require 'rubygems'
+require 'net/ldap'
+require 'resolv'
+require 'optparse'
+require 'ostruct'
+
+# Variables
+userid = String.new
+options = OpenStruct.new
+options.list = []
+
+# Functions
+
+def createops(userinfo)
+  output = Array.new
+  userinfo.each do |x,y|
+    if x == :givenname 
+      output << "[:replace, :#{x}, \"#{y}\"]"
+    end
+  end
+  return output
+end
+
+def addentry( env, server, password, entry, groups )
+  # check if the user is already in the other ldap
+  entrymod = Hash.new
+  entrymod = entry
+  exists = "no"
+  
+  puts "Checking #{server} in #{env}..."
+  newdn = "uid=#{entry.uid},ou=people,#{env}"
+
+  # Create the ops array
+  ops = Array.new
+  ops = createops(entrymod)
+
+  remip = Resolv.getaddress(server)
+
+  remoteldap = Net::LDAP.new :host => remip, :port => 389, :auth => {:method => :simple, :username => "cn=manager,#{env}", :password => password}
+  remfilter = Net::LDAP::Filter.eq( "uid", entrymod.uid )
+  rembase = "#{env}"
+
+  remoteldap.search( :base => rembase, :filter => remfilter, :return_result => false) {
+    # if the user is already in the directory, just update the entries
+    exists = "yes"
+    puts "\t Found #{entrymod.uid} on #{server}, updating entry."
+    entrymod.each do |a,b|
+      if a == :dn
+        # do nothing
+      else
+        #puts "\t Modifying attribute #{a} with #{b}"
+        remoteldap.replace_attribute newdn, a, b
+        # puts "\t Result: #{remoteldap.get_operation_result}"
+      end
+    end
+  }
+
+  # If the entry doesn't exist, add it.
+  if exists == "no"
+    puts "\t Didn't find entry, adding #{entrymod.uid}."
+    attr = Hash.new
+    attr[:uid] = entrymod.uid
+    attr[:cn] = entrymod.cn
+    attr[:givenName] = entrymod.givenname
+    attr[:sn] = entrymod.sn
+    attr[:objectClass] = ["posixAccount", "top", "person", "organizationalPerson", "inetorgPerson", "shadowaccount"]
+    attr[:userPassword] = entrymod.userpassword
+    attr[:loginshell] = entrymod.loginshell
+    attr[:uidNumber] = entrymod.uidNumber
+    attr[:gidNumber] = entrymod.gidNumber
+    attr[:homeDirectory] = entrymod.homeDirectory
+
+    # Not all legacy entries have gecos defined.
+    if entrymod.gecos
+      attr[:gecos] = entrymod.gecos
+    else
+      attr[:gecos] = "#{entrymod.givenname} #{entrymod.sn}"
+    end
+
+    remoteldap.add( :dn => newdn, :attributes => attr )
+    # puts "\t Result: #{remoteldap.get_operation_result}"
+  end
+
+  groups.each do |g|
+    puts "\t Checking for membership in group #{g}."
+    filter = Net::LDAP::Filter.eq( "memberUid", entrymod.uid )
+    treebase = "cn=#{g},ou=group,#{env}"
+    addgroup = "yes"
+    remoteldap.search( :base => treebase, :filter => filter, :return_result => false) {
+      addgroup = "no"
+      puts "\t #{entrymod.uid} is a member."
+    }
+    if addgroup == "yes"
+      puts "\t Adding #{entrymod.uid} to group."
+      gattr = Hash.new
+      gattr[:memberUid] = entrymod.uid
+      gbase = "memberUid=#{entrymod.uid},#{treebase}"
+      if remoteldap.add_attribute( treebase, :memberUid, entrymod.uid)
+      else
+        puts "\t Result: #{remoteldap.get_operation_result}"
+      end
+    end
+
+  end
+end
+
+def groupcheck(user)
+  ldap = Net::LDAP.new :host => "server", :port => 389, :auth => { :method => :simple, :username => "manager", :password => "password" }
+  groups = Array.new
+  filter = Net::LDAP::Filter.eq( "memberUid", user )
+  treebase = "ou=group,dc=whatever,dc=com"
+  attr = ["cn"]
+  ldap.search( :base => treebase, :filter => filter, :attributes => attr ) do |entry|
+    entry[:cn].each do |x|
+      groups << x
+    end
+  end
+  return groups
+end
+
+
+#
+# Main
+#
+
+OptionParser.new do |opts|
+  opts.banner = "Useage : ldappush -u <user_id>"
+
+  opts.on("-u \"User ID\"", String, "User ID to push.") do |cmnd|
+    userid = cmnd
+  end
+
+  opts.on_tail("-h", "--help", "-?", "Show this message") do
+    puts opts
+    exit
+  end
+
+end.parse!
+
+if userid == ""
+  puts "Please specify a userid:  -u <user_id>"
+  exit
+end
+
+ldap = Net::LDAP.new :host => "server", :port => 389, :auth => { :method => :simple, :username => "manager", :password => "password" }
+
+filter = Net::LDAP::Filter.eq( "uid", userid )
+treebase = "dc=whatever,dc=com"
+attr = ["objectclass", "sn", "cn", "uid", "givenname", "loginshell", "uidnumber", "homedirectory", "dn", "gidnumber", "userpassword", "gecos"]
+found = "no"
+
+puts "Checking for #{userid}."
+ldap.search( :base => treebase, :filter => filter, :attributes => attr ) do |entry| 
+  found = "yes"
+  puts "Found #{userid}."
+  puts "Checking which groups #{userid} has."
+  groups = Array.new
+  groups = groupcheck(userid)
+  puts "#{userid} is in groups: #{groups.inspect}"
+  puts "Modifying the new ldap servers with #{userid}'s information."
+  # The following should be uncommented and modified appropriately
+  # to do "the right thing."
+  #addentry("dc=whatever,dc=net", "server", "password", entry, groups)
+end
+
+if found == "no"
+  puts "#{userid} was not found."
+end
