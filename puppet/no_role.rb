@@ -51,7 +51,7 @@ end
 #puts @all_nodes.inspect
 #puts @role_nodes.inspect
 
-# finally, subtrack the role nodes from all nodes and what we have
+# finally, subtract the role nodes from all nodes and what we have
 # left are the nodes which don't have a role assigned.
 
 puts (@all_nodes - @role_nodes).inspect
