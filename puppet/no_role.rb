@@ -3,6 +3,9 @@
 # This script is designed to fill in a gap for which I haven't found a 
 # better way.
 #
+# Good News!  The better way is right here:
+# puppet query 'nodes['certname']{! certname in resources['certname']{type="Class" and title~"[Rr]ole"}}'
+#
 # To use, replace the rbac_token and puppetdb_url with appropriate 
 # values for your environment.
 #
@@ -10,6 +13,7 @@
 # any purpose.
 #
 # 08-07-2018 Bill Wilcox - Initial design
+# 08-08-2018 Bill Wilcox - Added the puppet query one-liner in the notes.
 #
 require 'httparty'
 require 'multi_xml'
