@@ -12,3 +12,10 @@ This one requires that you have the package inventory service turned on.
 ```
 puppet query "nodes[certname]{! certname in package_inventory[certname]{ package_name ~ 'audit' }}"
 ```
+
+## Find servers which don't have a fact
+
+```
+puppet query 'inventory[certname] { ! facts { name = "blah" } }'
+```
+
