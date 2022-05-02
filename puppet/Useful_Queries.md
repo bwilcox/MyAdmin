@@ -19,3 +19,10 @@ puppet query "nodes[certname]{! certname in package_inventory[certname]{ package
 puppet query 'inventory[certname] { ! facts { name = "blah" } }'
 ```
 
+## Exported resources
+
+```
+puppet query "resources[certname, type, title] { exported = true }"
+puppet query "resources[count()] { exported = true }"
+```
+

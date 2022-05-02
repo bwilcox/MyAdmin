@@ -3,7 +3,7 @@ Install-Module RubyInstaller
 Install-Ruby
 ```
 
-Note, I had problems with the chocolatey version of ruby.  As a backup, download the ruby installer from rubyinstall.org and install it.  Either way will need to update the environment path to include the ruby directory.
+Note, I had problems with the chocolatey version of ruby.  As a backup, download the ruby installer from rubyinstall.org and install it. Get the devkit version. Either way will need to update the environment path to include the ruby directory.
 
 Download the modules you want to use for testing. Direct the modulepath somewhere you'll be able to find it again.
 
